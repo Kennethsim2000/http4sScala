@@ -1,8 +1,9 @@
 import cats.Monad
 import cats.effect.{ExitCode, IO, IOApp}
-import org.http4s.{HttpRoutes, QueryParamDecoder}
+import org.http4s.{HttpApp, HttpRoutes, QueryParamDecoder}
 import org.http4s.dsl.Http4sDsl
 import org.http4s.dsl.impl.{OptionalQueryParamDecoderMatcher, QueryParamDecoderMatcher}
+import org.http4s.syntax.kleisli._
 
 import java.time.Year
 import scala.util.Try
@@ -57,6 +58,21 @@ object Movie extends IOApp {
             case GET -> Root / "directors"/ DirectorVar(director) => ???
         }
     }
+    //composing routes
+    def allRoutes[F[_]: Monad] :HttpRoutes[F] = {
+        import cats.syntax.semigroupk._
+        movieRoutes[F] <+> directorRoutes[F]
+    }
+    //handle if some routes do not match with any of the available routes
+    def allRoutesComplete[F[_]: Monad]: HttpApp[F] = {
+        allRoutes.orNotFound
+    }
+    /* As we can see, the method returns an instance of the type HttpApp[F], which is a type alias for
+    Kleisli[F, Request[F], Response[F]]. Hence, for what we said at the beginning of this article, this Kleisli is
+    nothing more than a wrapper around the function Request[G] => F[Response[G]]. So, the difference with the
+    HttpRoutes[F] type is that we removed the OptionT on the response. */
+
+
 
     override def run(args: List[String]): IO[ExitCode] = ???
 }
