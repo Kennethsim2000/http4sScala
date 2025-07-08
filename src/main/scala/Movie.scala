@@ -1,17 +1,18 @@
 import cats.*
 import cats.effect.*
-import cats.implicits.* // required for req.as[Director]
+import cats.implicits.*
 import org.http4s.*
 import org.http4s.dsl.Http4sDsl
 import org.http4s.dsl.impl.{OptionalValidatingQueryParamDecoderMatcher, QueryParamDecoderMatcher}
 import org.http4s.syntax.kleisli.*
-import io.circe.syntax.* // bring into scope asJson
-import io.circe.generic.auto.* //Automatically generates Encoder and Decoder instances for your case classes.
+import io.circe.syntax.*
+import io.circe.generic.auto.*
 import org.http4s.circe.*
 import org.http4s.headers.`Content-Encoding`
 import org.typelevel.ci.CIString
 
 import java.time.Year
+import java.util.UUID
 import scala.collection.mutable
 import scala.util.Try
 
@@ -22,6 +23,18 @@ object Movie extends IOApp {
     case class Director(firstName:String, lastName: String) {
         override def toString: String = s"$firstName $lastName"
     }
+
+    val movie1: Movie = Movie("6bcbca1e-efd3-411d-9f7c-14b872444fce", "How to train your dragon", 2019,
+        List("kenneth", "Tom cruise", "TOP"), "Kenneth sim")
+    val movieMap: Map[String, Movie] = Map(movie1.id -> movie1);
+
+    def findById(movieId: UUID): Option[Movie] = {
+        movieMap.get(movieId.toString);
+    }
+    def findByDirector(director: String):List[Movie] = {
+        movieMap.values.filter(_.director == director).toList
+    }
+
 
     object DirectorQueryParamMatcher extends QueryParamDecoderMatcher[String]("director")
     //The QueryParamDecoderMatcher requires the name of the parameter and its type
@@ -98,7 +111,7 @@ object Movie extends IOApp {
         //Because reading a request body is asynchronous and cancelable, it requires Concurrent[F], not just Monad[F]
         HttpRoutes.of[F] {
             case GET -> Root / "directors"/ DirectorVar(director) =>
-                directorMap.get(director.toString) match {
+                directorMap.get(director.toString) match { // calling asJson requires an implict Encoder[A]
                     case Some(foundDirector) => Ok(foundDirector.asJson, Header.Raw(CIString("my-custom-Header"), "value"))
                     case None => NotFound(s"No director called $director found")
                 }
@@ -146,4 +159,10 @@ object Movie extends IOApp {
 * Circe Encoder[A] – knows how to convert a Scala object into JSON
 
 Http4s EntityEncoder[F, A] – knows how to send an A in an HTTP response (e.g. with proper content-type, charset, etc.)
-*  */
+*/
+
+/** IMPORTS AND THEIR MEANINGS
+    * import cats.implicits.* // required for req.as[Director]
+    * import io.circe.syntax.* // bring into scope asJson
+    * import io.circe.generic.auto.* //Automatically generates Encoder and Decoder instances for your case classes.
+*/
