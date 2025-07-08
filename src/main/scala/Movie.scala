@@ -68,13 +68,23 @@ object Movie extends IOApp {
         HttpRoutes.of[F] {
             case GET -> Root / "Movies" :? DirectorQueryParamMatcher(director) +& YearQueryParamMatcher(maybeYear) =>
                 maybeYear match {
-                    case Some(year) => year.fold(
+                    case Some(y) => y.fold( // cats validated.fold
                         _ => BadRequest("The given year is not valid"), //invalid
-                        year => ??? // valid
+                        {
+                            validYear => // valid
+                                val movieByDirector = findByDirector(director)
+                                val movieByDirectorAndYear = movieByDirector.filter(_.year == validYear.getValue)
+                                Ok(movieByDirectorAndYear.asJson)
+
+                        }
                     )
-                    case None => ???
+                    case None => Ok(findByDirector(director).asJson)
                 } //The method .fold on Validated[E, A] lets you handle both cases (Invalid and Valid) in a functional way.
-            case GET -> Root/ "Movies"/ UUIDVar(movieId) / "actors" => ???
+            case GET -> Root/ "Movies"/ UUIDVar(movieId) / "actors" =>
+                findById(movieId).map(_.actors) match {
+                    case Some(actors) => Ok(actors.asJson)
+                    case None => NotFound(s"No movie with $movieId is found")
+                }
             //UUIDVar is a route extractor used to match and convert path segments into UUID objects.
         }
         // we parameterise the route definition with an effect F, as we probably have to retrieve some information from
