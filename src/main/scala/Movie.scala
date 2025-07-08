@@ -1,9 +1,13 @@
-import cats.Monad
-import cats.effect.{ExitCode, IO, IOApp}
-import org.http4s.{HttpApp, HttpRoutes, QueryParamDecoder}
+import cats.*
+import cats.effect.*
+import cats.syntax.either.*
+import org.http4s.{HttpApp, HttpRoutes, ParseFailure, QueryParamDecoder}
 import org.http4s.dsl.Http4sDsl
 import org.http4s.dsl.impl.{OptionalQueryParamDecoderMatcher, QueryParamDecoderMatcher}
-import org.http4s.syntax.kleisli._
+import org.http4s.syntax.kleisli.*
+import io.circe.syntax.*
+import io.circe.generic.auto.*
+import org.http4s.circe.*
 
 import java.time.Year
 import scala.util.Try
@@ -21,8 +25,16 @@ object Movie extends IOApp {
     object YearQueryParamMatcher extends OptionalQueryParamDecoderMatcher[Year]("year")
 
     //create an implicit queryParamDecoder that can be used by our YearQueryParamDecoderMatcher
-    implicit val yearQueryParamDecoder: QueryParamDecoder[Year] = QueryParamDecoder[Int].map(x=> Year.of(x))
-
+    implicit val yearQueryParamDecoder: QueryParamDecoder[Year] = QueryParamDecoder[Int]
+        .emap { y=>
+            Try(Year.of(y)) //Try type represents a computation that may either result in an exception, or return a successfully computed value
+                .toEither
+                .leftMap { tr=>
+                    ParseFailure(tr.getMessage, tr.getMessage)
+                }
+            }
+    //emap returns an Either, where the leftMap is a ParseFailure
+    //ParseFailure is a type of the http4s library indicating an error parsing an HTTP Message
 
     //GET / movies ? director = Zack % 20 Snyder & year = 2021
     //GET /movies/aa4f0f9c-c703-4f21-8c05-6a0c8f2052f0/actors
@@ -39,8 +51,7 @@ object Movie extends IOApp {
         // Each case statement represents a route,
     }
 
-    //defining a custom Director route extractor
-
+    //defining a custom Director route extractor, used to extract a Director from the path
     object DirectorVar {
         def unapply(str: String): Option[Director] = {
             if(str.nonEmpty && str.matches(".*.*")) {
@@ -51,11 +62,19 @@ object Movie extends IOApp {
             } else None
         }
     }
+
+    // mutable map mapping actor to director
+    val directorMap:Map[Actor, Director] = Map("Zack Snyder" -> Director("Zack", "Snyder"));
+
     def directorRoutes[F[_]: Monad]: HttpRoutes[F] = {
         val dsl = Http4sDsl[F]
         import dsl._
         HttpRoutes.of[F] {
-            case GET -> Root / "directors"/ DirectorVar(director) => ???
+            case GET -> Root / "directors"/ DirectorVar(director) =>
+                directorMap.get(director.toString) match {
+                    case Some(foundDirector) => Ok(foundDirector.asJson)
+                    case None => NotFound(s"No director called $director found")
+                }
         }
     }
     //composing routes
