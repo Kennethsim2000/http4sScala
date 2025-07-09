@@ -7,16 +7,19 @@ import org.http4s.dsl.impl.{OptionalValidatingQueryParamDecoderMatcher, QueryPar
 import org.http4s.syntax.kleisli.*
 import io.circe.syntax.*
 import io.circe.generic.auto.*
+import org.http4s.blaze.server.BlazeServerBuilder
 import org.http4s.circe.*
 import org.http4s.headers.`Content-Encoding`
+import org.http4s.server.Router
 import org.typelevel.ci.CIString
 
 import java.time.Year
 import java.util.UUID
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext.global
 import scala.util.Try
 
-object Movie extends IOApp {
+object Http4sTutorial extends IOApp {
 
     type Actor = String
     case class Movie(id:String, title:String, year:Int, actors:List[String], director: String)
@@ -60,13 +63,13 @@ object Movie extends IOApp {
     //ParseFailure is a type of the http4s library indicating an error parsing an HTTP Message
 
 
-    //GET / movies ? director = Zack % 20 Snyder & year = 2021
-    //GET /movies/aa4f0f9c-c703-4f21-8c05-6a0c8f2052f0/actors
+    //GET http://localhost:8080/api/movies?director=Kenneth%20sim&year=2019
+    //GET http://localhost:8080/api/movies/6bcbca1e-efd3-411d-9f7c-14b872444fce/actors
     def movieRoutes[F[_]: Monad]: HttpRoutes[F] = {
         val dsl = Http4sDsl[F]
         import dsl._
         HttpRoutes.of[F] {
-            case GET -> Root / "Movies" :? DirectorQueryParamMatcher(director) +& YearQueryParamMatcher(maybeYear) =>
+            case GET -> Root / "movies" :? DirectorQueryParamMatcher(director) +& YearQueryParamMatcher(maybeYear) =>
                 maybeYear match {
                     case Some(y) => y.fold( // cats validated.fold
                         _ => BadRequest("The given year is not valid"), //invalid
@@ -80,7 +83,7 @@ object Movie extends IOApp {
                     )
                     case None => Ok(findByDirector(director).asJson)
                 } //The method .fold on Validated[E, A] lets you handle both cases (Invalid and Valid) in a functional way.
-            case GET -> Root/ "Movies"/ UUIDVar(movieId) / "actors" =>
+            case GET -> Root/ "movies"/ UUIDVar(movieId) / "actors" =>
                 findById(movieId).map(_.actors) match {
                     case Some(actors) => Ok(actors.asJson)
                     case None => NotFound(s"No movie with $movieId is found")
@@ -95,7 +98,7 @@ object Movie extends IOApp {
     //defining a custom Director route extractor, used to extract a Director from the path
     object DirectorVar {
         def unapply(str: String): Option[Director] = {
-            if(str.nonEmpty && str.matches(".*.*")) {
+            if(str.nonEmpty) {
                 Try {
                     val director = str.split(" ")
                     Director(director(0), director(1))
@@ -105,7 +108,8 @@ object Movie extends IOApp {
     }
 
     // mutable map mapping actor to director
-    val directorMap:mutable.Map[Actor, Director] = mutable.Map("Zack Snyder" -> Director("Zack", "Snyder"));
+    val directorMap:mutable.Map[Actor, Director] = mutable.Map("Zack Snyder" -> Director("Zack", "Snyder"),
+        "kenneth sim" -> Director("kenneth", "sim"));
 
 
     //Concurrent[F] is a type class from Cats Effect that describes effect types that support concurrency and
@@ -121,11 +125,13 @@ object Movie extends IOApp {
         //Because reading a request body is asynchronous and cancelable, it requires Concurrent[F], not just Monad[F]
         HttpRoutes.of[F] {
             case GET -> Root / "directors"/ DirectorVar(director) =>
+                // GET http://localhost:8080/api/private/directors/kenneth sim
                 directorMap.get(director.toString) match { // calling asJson requires an implict Encoder[A]
                     case Some(foundDirector) => Ok(foundDirector.asJson, Header.Raw(CIString("my-custom-Header"), "value"))
                     case None => NotFound(s"No director called $director found")
                 }
             case req@POST -> Root/ "directors" =>
+                //http://localhost:8080/api/private/directors
                 for {
                     director <- req.as[Director] // need to import cats.implicits._
                     _ = directorMap.put(director.toString, director)
@@ -149,9 +155,24 @@ object Movie extends IOApp {
     nothing more than a wrapper around the function Request[G] => F[Response[G]]. So, the difference with the
     HttpRoutes[F] type is that we removed the OptionT on the response. */
 
+    override def run(args: List[String]): IO[ExitCode] = {
+//        val movieApp = Http4sTutorial.allRoutesComplete[IO]
+// we chose the IO monad as an effect
+        val apis = Router(
+            "/api" -> Http4sTutorial.movieRoutes[IO],
+            "/api/private"-> Http4sTutorial.directorRoutes[IO]
+        ).orNotFound
+        //The IOApp is a utility type that allows us to run applications that use the IO effect.
+        BlazeServerBuilder[IO](global) //the builder needs an instance of a scala.concurrent.ExecutionContext to handle incoming requests concurrently.
+            .bindHttp(8080, "localhost")
+            .withHttpApp(apis)
+            .resource
+            .use(_=>IO.never)
+            .as(ExitCode.Success)
+    }
 
 
-    override def run(args: List[String]): IO[ExitCode] = ???
+
 }
 
 /*
