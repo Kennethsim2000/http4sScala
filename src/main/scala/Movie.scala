@@ -113,7 +113,7 @@ object Http4sTutorial extends IOApp {
 
 
     //Concurrent[F] is a type class from Cats Effect that describes effect types that support concurrency and
-    // cancelation, like IO, Task, ZIO
+    // cancellation, like IO, Task, ZIO
     //jsonOf[F, A] is the http4s + Circe integration that creates an EntityDecoder[F, A]. It’s used to parse JSON from
     // an HTTP request body into a Scala type
     def directorRoutes[F[_]: Concurrent]: HttpRoutes[F] = {
@@ -133,7 +133,7 @@ object Http4sTutorial extends IOApp {
             case req@POST -> Root/ "directors" =>
                 //http://localhost:8080/api/private/directors
                 for {
-                    director <- req.as[Director] // need to import cats.implicits._
+                    director <- req.as[Director] // need to import cats.implicits._, without importing you would get a flatmap error
                     _ = directorMap.put(director.toString, director)
                     res <- Ok.headers(`Content-Encoding`(ContentCoding.gzip))
                         .map(_.addCookie(ResponseCookie("My-Cookie", "value")))
@@ -196,4 +196,5 @@ Http4s EntityEncoder[F, A] – knows how to send an A in an HTTP response (e.g. 
     * import cats.implicits.* // required for req.as[Director]
     * import io.circe.syntax.* // bring into scope asJson
     * import io.circe.generic.auto.* //Automatically generates Encoder and Decoder instances for your case classes.
+    * import org.http4s.syntax.kleisli.* //Used for router.orNotFound
 */
