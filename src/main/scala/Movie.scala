@@ -52,7 +52,7 @@ object Http4sTutorial extends IOApp {
 
     //create an implicit queryParamDecoder that can be used by our YearQueryParamDecoderMatcher
     implicit val yearQueryParamDecoder: QueryParamDecoder[Year] = QueryParamDecoder[Int]
-        .emap { y=>
+        .emap { y =>
             Try(Year.of(y)) //Try type represents a computation that may either result in an exception, or return a successfully computed value
                 .toEither
                 .leftMap { tr=>
@@ -61,6 +61,15 @@ object Http4sTutorial extends IOApp {
             }
     //emap returns an Either, where the leftMap is a ParseFailure
     //ParseFailure is a type of the http4s library indicating an error parsing an HTTP Message
+    //QueryParamDecoder[A] works with Either[ParseFailure, A]
+    //The OptionalValidatingQueryParamDecoderMatcher will lift the QueryParamDecoder's Either result into a ValidatedNel for you.
+    //You are only responsible for defining how to decode a single value from the query parameter (here, a Year).
+    // That decoding function uses Either[ParseFailure, A] to represent failure or success.
+
+    //The matcher takes a query param and tries to decode it using the implicit QueryParamDecoder[A]. Internally:
+    //If the parameter is missing, you get None
+    //If it's present and decoding succeeds: Some(Valid(year))
+    //If it's present and decoding fails: Some(Invalid(...))
 
 
     //GET http://localhost:8080/api/movies?director=Kenneth%20sim&year=2019
