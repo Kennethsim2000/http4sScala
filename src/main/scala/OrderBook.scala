@@ -1,7 +1,7 @@
 import OrderBook.Type.{Buy, Sell}
 import cats.Monad
 import cats.effect.{Concurrent, ExitCode, IO, IOApp}
-import org.http4s.{ContentCoding, EntityDecoder, HttpRoutes, ResponseCookie}
+import org.http4s.{ContentCoding, EntityDecoder, HttpApp, HttpRoutes, ResponseCookie}
 import org.http4s.blaze.server.BlazeServerBuilder
 import org.http4s.dsl.Http4sDsl
 import org.http4s.server.Router
@@ -31,26 +31,35 @@ object OrderBook extends IOApp{
         case other => Left(s"Unknown orderType: $other")
     }
 
-    //be able to compute a user's profits as well.
-
     case class Order(OrderId:UUID, userId:String, instrument: String, orderType: Type, price: Int, quantity: Int)
     //Order consist of OrderId, userId, instrument, type(buy sell), price, quantity
 
-    //we can use a map to store userId mapped to the list of existing order the user has made
+    //we can use a map to store userId mapped to the list of existing order that the user currently has(not fulfilled)
     val orderMap: mutable.Map[String, List[Order]] = mutable.Map();
 
-    val buyMap: mutable.Map[String, mutable.PriorityQueue[Order]] = mutable.Map() // map each instrument to each corresponding priorityqueue containing orders
+    //Map that maps userId to a list of orders that this user has transacted
+    val transactionMap: mutable.Map[String, List[Order]] = mutable.Map();
+
+    //used for deleted orders, so we do not match them in matchOrder
+    val deletedOrders: mutable.Set[UUID] = mutable.Set();
+
+    val buyMap: mutable.Map[String, mutable.PriorityQueue[Order]] = mutable.Map()
+    // map each instrument to each corresponding priorityqueue containing orders
     val sellMap: mutable.Map[String, mutable.PriorityQueue[Order]] = mutable.Map()
 
     //orderings
-    implicit val buyOrdering: Ordering[Order] = Ordering.by[Order, Int](_.price).reverse // buy ordering must be sorted in descending order, with the highest buy first
+    implicit val buyOrdering: Ordering[Order] = Ordering.by[Order, Int](_.price).reverse
+    // buy ordering must be sorted in descending order, with the highest buy first
     implicit val sellOrdering: Ordering[Order] = Ordering.by[Order, Int](_.price)
     //we have to add in the [Order, Int] if not we will get price is not a member of any
 
+    //TODO: complete matchOrder
     def matchOrder(order: Order) = {
 
         if(order.orderType == Type.Buy) {
             val sellOrders = sellMap.getOrElseUpdate(order.instrument, PriorityQueue.empty[Order](sellOrdering))
+            val sellList = sellOrders.dequeueAll.toList // we dequeue all to list
+            val (remainingQty, updatedSellList) = matchLoop(order, sellList)
 
 
 
@@ -92,9 +101,9 @@ object OrderBook extends IOApp{
 
     object UserQueryParamMatcher extends QueryParamDecoderMatcher[String]("user")
 
-    // POST Order to add a Order to the orderbook
-    // GET Order to view all orders of a particular user
-    // DELETE orderId to delete a particular order
+    // POST Order to add a Order to the orderbook: /api/orders
+    // GET Order to view all unfilled orders of a particular user: /api/orders?user=kenneth
+    // DELETE orderId to delete a particular order /api/orders/312312412
     def orderRoutes[F[_] : Concurrent]: HttpRoutes[F] = {
         val dsl = Http4sDsl[F]
         import dsl._
@@ -104,6 +113,7 @@ object OrderBook extends IOApp{
             case req@POST -> Root/ "orders" =>
                 for {
                     order <- req.as[Order]
+                    _= matchOrder(order) // call match order to insert
                     existingOrders = orderMap.getOrElse(order.userId, List())
                     newOrders = existingOrders :+ order // scala list are immutable
                     _ = orderMap.put(order.userId, newOrders)
@@ -114,14 +124,42 @@ object OrderBook extends IOApp{
                     Ok(orders.asJson) //requires org.http4s.circe._
                     //you’re returning a Circe Json object (orders.asJson), but http4s doesn't automatically know how to
             // turn that into an HTTP response body — unless you provide an implicit EntityEncoder for that type.
+
+            case DELETE -> Root / "orders" / UUIDVar(orderId) => ???
+            //TODO: Implement delete orderId(using the deleted set)
+
         }
 
     }
 
+    // GET all transacted orders of a user /api/users?user=kenneth
+    // GET the profits/loss of a user /api/users/profits?user=kenneth
+    def userRoutes[F[_] : Concurrent]: HttpRoutes[F] = {
+        val dsl = Http4sDsl[F]
+        import dsl._
+
+        HttpRoutes.of[F] {
+            //TODO: Obtain all transacted orders of a user
+            case GET -> Root / "users" :? UserQueryParamMatcher(user) => ???
+            //TODO: Obtain the profits of a user
+            case GET -> Root / "users" / "profits" :? UserQueryParamMatcher(user) => ???
+
+        }
+
+    }
+
+    def allRoutes[F[_] : Concurrent]: HttpRoutes[F] = {
+        import cats.syntax.semigroupk._
+        orderRoutes[F] <+> userRoutes[F]
+    }
+
+    def allRoutesComplete[F[_] : Concurrent]: HttpApp[F] = {
+        allRoutes.orNotFound
+    }
+    
     override def run(args: List[String]): IO[ExitCode] = {
-        val apis = Router(
-            "/api" -> OrderBook.orderRoutes[IO],
-        ).orNotFound
+        import cats.syntax.semigroupk._
+        val apis = OrderBook.allRoutesComplete[IO]
         BlazeServerBuilder[IO](global)
             .bindHttp(8080, "localhost")
             .withHttpApp(apis)
@@ -130,3 +168,4 @@ object OrderBook extends IOApp{
             .as(ExitCode.Success)
     }
 }
+
