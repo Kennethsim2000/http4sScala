@@ -199,14 +199,13 @@ object OrderBook extends IOApp{
         import cats.syntax.semigroupk._
         orderRoutes[F] <+> userRoutes[F]
     }
-
-    def allRoutesComplete[F[_] : Concurrent]: HttpApp[F] = {
-        allRoutes.orNotFound
-    }
+    
     
     override def run(args: List[String]): IO[ExitCode] = {
         import cats.syntax.semigroupk._
-        val apis = OrderBook.allRoutesComplete[IO]
+        val apis = Router(
+            "/api" -> allRoutes[IO]
+        ).orNotFound
         BlazeServerBuilder[IO](global)
             .bindHttp(8080, "localhost")
             .withHttpApp(apis)
