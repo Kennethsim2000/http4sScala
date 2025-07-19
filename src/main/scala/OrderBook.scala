@@ -31,8 +31,10 @@ object OrderBook extends IOApp{
         case other => Left(s"Unknown orderType: $other")
     }
 
-    case class Order(OrderId:UUID, userId:String, instrument: String, orderType: Type, price: Int, quantity: Int)
+    case class Order(orderId:UUID, userId:String, instrument: String, orderType: Type, price: Int, quantity: Int)
     //Order consist of OrderId, userId, instrument, type(buy sell), price, quantity
+
+    case class OrderReq(userId:String, instrument: String, orderType: Type, price: Int, quantity: Int)
 
     case class Transaction(transactionId: UUID, userId: String, instrument: String, orderType: Type, price: Int, quantity: Int)
 
@@ -55,23 +57,50 @@ object OrderBook extends IOApp{
     implicit val sellOrdering: Ordering[Order] = Ordering.by[Order, Int](_.price)
     //we have to add in the [Order, Int] if not we will get price is not a member of any
 
-    //TODO: complete matchOrder
-    def matchOrder(order: Order) = {
+    def matchOrder(order: OrderReq): Option[Order] = {
 
         if(order.orderType == Type.Buy) {
-            val sellOrders = sellMap.getOrElseUpdate(order.instrument, PriorityQueue.empty[Order](sellOrdering))
+            val sellOrders = sellMap.getOrElseUpdate(order.instrument, mutable.PriorityQueue.empty[Order](using sellOrdering))
             val sellList = sellOrders.dequeueAll.toList // we dequeue all to list
             val (remainingQty, updatedSellList) = matchLoop(order, sellList)
+            val sellPriorityQueue = mutable.PriorityQueue(updatedSellList*)(using sellOrdering)
+            sellMap.put(order.instrument, sellPriorityQueue)
+
+            // If the order is not fulfilled, add a buy order to the buy orderbook
+            if (remainingQty > 0) {
+                val buyOrder = Order(UUID.randomUUID(), order.userId, order.instrument, order.orderType,
+                    order.price, remainingQty)
+                val buyPriorityQueue = buyMap.getOrElseUpdate(order.instrument, mutable.PriorityQueue.empty[Order](using buyOrdering))
+                buyPriorityQueue.enqueue(buyOrder)
+                buyMap.put(order.instrument, buyPriorityQueue)
+                Some(buyOrder)
+            } else {
+                None
+            }
 
 
+        } else { // order type is sell, obtain the buy orderbook
+            val buyOrders = buyMap.getOrElseUpdate(order.instrument, mutable.PriorityQueue.empty[Order](using buyOrdering))
+            val buyList = buyOrders.dequeueAll.toList // we dequeue all to list
+            val (remainingQty, updatedBuyList) = matchLoop(order, buyList)
+            val buyPriorityQueue = mutable.PriorityQueue(updatedBuyList *)(using sellOrdering)
+            buyMap.put(order.instrument, buyPriorityQueue)
 
-        } else {
-
+            if (remainingQty > 0) {
+                val sellOrder = Order(UUID.randomUUID(), order.userId, order.instrument, order.orderType,
+                    order.price, remainingQty)
+                val sellPriorityQueue = sellMap.getOrElseUpdate(order.instrument, mutable.PriorityQueue.empty[Order](using buyOrdering))
+                sellPriorityQueue.enqueue(sellOrder)
+                sellMap.put(order.instrument, sellPriorityQueue)
+                Some(sellOrder)
+            } else {
+                None
+            }
         }
 
     }
 
-    def matchLoop(order: Order, orderList: List[Order]): (Int, List[Order]) = {
+    def matchLoop(order: OrderReq, orderList: List[Order]): (Int, List[Order]) = {
         // returns unfilled quantity, as well as updated order book
         val remainingOrders = orderList.foldLeft((order.quantity, List.empty[Order])) {
             case ((0, currOrderBook ), currentOrder) => (0, currOrderBook :+ currentOrder) // if quantity left is 0, meaning order is filled
@@ -124,15 +153,15 @@ object OrderBook extends IOApp{
     def orderRoutes[F[_] : Concurrent]: HttpRoutes[F] = {
         val dsl = Http4sDsl[F]
         import dsl._
-        implicit val orderDecoder: EntityDecoder[F, Order] = jsonOf[F, Order]
+        implicit val orderReqDecoder: EntityDecoder[F, OrderReq] = jsonOf[F, OrderReq]
 
         HttpRoutes.of[F] {
             case req@POST -> Root/ "orders" =>
                 for {
-                    order <- req.as[Order]
-                    _= matchOrder(order) // call match order to insert
+                    order <- req.as[OrderReq]
+                    remainingOrder = matchOrder(order) // call match order to insert
                     existingOrders = orderMap.getOrElse(order.userId, List())
-                    newOrders = existingOrders :+ order // scala list are immutable
+                    newOrders = remainingOrder.fold(existingOrders)(existingOrders :+ _)
                     _ = orderMap.put(order.userId, newOrders)
                     res <- Ok(order.asJson)
                 } yield res
