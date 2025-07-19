@@ -111,7 +111,7 @@ object OrderBook extends IOApp{
                 }
                 if (canMatch) {
                     val transactedQuantity = math.min(order.quantity, currentOrder.quantity)
-                    println(s"Matched order $order.orderId for $transactedQuantity units")
+                    println(s"Matched order $order and $currentOrder for $transactedQuantity units")
 
                     // Transactions for the incoming order
                     val incomingOrderTransactions = transactionMap.getOrElse(order.userId, List())
@@ -132,6 +132,10 @@ object OrderBook extends IOApp{
                     val remainingQuantity = quantity - transactedQuantity
                     val currOrderQuantity = currentOrder.quantity - transactedQuantity
                     if(currOrderQuantity == 0) {
+                        // need to remove filled order from orderMap
+                        val currOrders = orderMap.getOrElse(currentOrder.userId, List())
+                        val updatedOrders = currOrders.filterNot(_.orderId == currentOrder.orderId)
+                        orderMap.put(currentOrder.userId, updatedOrders)
                         (remainingQuantity, currOrderBook) // our current order has filled up, do not add back to orderBook
                     } else {
                         (remainingQuantity, currOrderBook :+ currentOrder.copy(quantity = currOrderQuantity))
@@ -162,6 +166,7 @@ object OrderBook extends IOApp{
                     remainingOrder = matchOrder(order) // call match order to insert
                     existingOrders = orderMap.getOrElse(order.userId, List())
                     newOrders = remainingOrder.fold(existingOrders)(existingOrders :+ _)
+                    // only add to orderMap if the new order is unfilled
                     _ = orderMap.put(order.userId, newOrders)
                     res <- Ok(order.asJson)
                 } yield res
@@ -199,7 +204,7 @@ object OrderBook extends IOApp{
         import cats.syntax.semigroupk._
         orderRoutes[F] <+> userRoutes[F]
     }
-    
+
     
     override def run(args: List[String]): IO[ExitCode] = {
         import cats.syntax.semigroupk._
