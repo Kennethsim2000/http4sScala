@@ -34,11 +34,13 @@ object OrderBook extends IOApp{
     case class Order(OrderId:UUID, userId:String, instrument: String, orderType: Type, price: Int, quantity: Int)
     //Order consist of OrderId, userId, instrument, type(buy sell), price, quantity
 
+    case class Transaction(transactionId: UUID, userId: String, instrument: String, orderType: Type, price: Int, quantity: Int)
+
     //we can use a map to store userId mapped to the list of existing order that the user currently has(not fulfilled)
     val orderMap: mutable.Map[String, List[Order]] = mutable.Map();
 
     //Map that maps userId to a list of orders that this user has transacted
-    val transactionMap: mutable.Map[String, List[Order]] = mutable.Map();
+    val transactionMap: mutable.Map[String, List[Transaction]] = mutable.Map();
 
     //used for deleted orders, so we do not match them in matchOrder
     val deletedOrders: mutable.Set[UUID] = mutable.Set();
@@ -72,7 +74,7 @@ object OrderBook extends IOApp{
     def matchLoop(order: Order, orderList: List[Order]): (Int, List[Order]) = {
         // returns unfilled quantity, as well as updated order book
         val remainingOrders = orderList.foldLeft((order.quantity, List.empty[Order])) {
-            case ((0, currOrderBook ), currentOrder) => (0, currOrderBook :+ currentOrder)
+            case ((0, currOrderBook ), currentOrder) => (0, currOrderBook :+ currentOrder) // if quantity left is 0, meaning order is filled
             case ((quantity, currOrderBook), currentOrder) =>
                 val canMatch = {
                     if(order.orderType == Buy) order.price >= currentOrder.price
@@ -81,19 +83,34 @@ object OrderBook extends IOApp{
                 if (canMatch) {
                     val transactedQuantity = math.min(order.quantity, currentOrder.quantity)
                     println(s"Matched order $order.orderId for $transactedQuantity units")
+
+                    // Transactions for the incoming order
+                    val incomingOrderTransactions = transactionMap.getOrElse(order.userId, List())
+                    val incomingTransaction = Transaction(
+                        UUID.randomUUID(), order.userId, order.instrument, order.orderType,
+                        order.price, transactedQuantity
+                    )
+                    transactionMap.put(order.userId, incomingOrderTransactions :+ incomingTransaction)
+
+                    // Transactions for the existing order in the book
+                    val existingOrderTransactions = transactionMap.getOrElse(currentOrder.userId, List())
+                    val existingTransaction = Transaction(
+                        UUID.randomUUID(), currentOrder.userId, currentOrder.instrument,
+                        currentOrder.orderType, order.price, transactedQuantity
+                    )
+                    transactionMap.put(currentOrder.userId, existingOrderTransactions :+ existingTransaction)
+
                     val remainingQuantity = quantity - transactedQuantity
                     val currOrderQuantity = currentOrder.quantity - transactedQuantity
                     if(currOrderQuantity == 0) {
-                        (remainingQuantity, currOrderBook) // our current order has filled up
+                        (remainingQuantity, currOrderBook) // our current order has filled up, do not add back to orderBook
                     } else {
                         (remainingQuantity, currOrderBook :+ currentOrder.copy(quantity = currOrderQuantity))
-                        // our order
+                        // add the order with remaining quantity back to orderbook
                     }
                 } else { // cannot match already
                     (quantity, currOrderBook :+ currentOrder) // add our current order to our orderbook because we cannot match
                 }
-
-            // if it is a buy order, then it must be bigger than what the seller wants to sell at
         }
         return remainingOrders
 
@@ -139,8 +156,9 @@ object OrderBook extends IOApp{
         import dsl._
 
         HttpRoutes.of[F] {
-            //TODO: Obtain all transacted orders of a user
-            case GET -> Root / "users" :? UserQueryParamMatcher(user) => ???
+            case GET -> Root / "users" :? UserQueryParamMatcher(user) =>
+                val transactions = transactionMap.getOrElse(user, List())
+                Ok(transactions.asJson)
             //TODO: Obtain the profits of a user
             case GET -> Root / "users" / "profits" :? UserQueryParamMatcher(user) => ???
 
