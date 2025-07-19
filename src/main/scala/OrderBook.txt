@@ -1,0 +1,90 @@
+1. Add a order to the orderbook
+Method Type: POST
+URL: http://localhost:8080/api/orders
+RequestBody:
+{
+    "userId": "kenneth",
+    "instrument": "APPL",
+    "orderType": "Buy",
+    "price": 100,
+    "quantity": 1
+}
+Expected response body:
+{
+    "userId": "kenneth",
+    "instrument": "APPL",
+    "orderType": "Buy",
+    "price": 100,
+    "quantity": 1
+}
+
+2. Obtain the unfilled orders from the orderbook
+Method Type: GET
+URL: http://localhost:8080/api/orders?user=kenneth
+Expected response body:
+[
+    {
+        "orderId": "82676e9f-0576-4c2b-bfb3-8cc61a9e9142",
+        "userId": "kenneth",
+        "instrument": "APPL",
+        "orderType": "Buy",
+        "price": 100,
+        "quantity": 1
+    }
+]
+
+3. Add a sell order to the orderbook
+Method Type: POST
+URL: http://localhost:8080/api/orders
+RequestBody:
+{
+    "userId": "Thomas",
+    "instrument": "APPL",
+    "orderType": "Sell",
+    "price": 100,
+    "quantity": 1
+}
+Expected response body:
+{
+    "userId": "Thomas",
+    "instrument": "APPL",
+    "orderType": "Sell",
+    "price": 100,
+    "quantity": 1
+}
+
+4. Obtain the unfilled orders from the orderbook
+Method Type: GET
+URL: http://localhost:8080/api/orders?user=kenneth
+Expected response body:
+[]
+
+5. Obtain the orders filled for kenneth
+Method Type: GET
+URL: http://localhost:8080/api/users?user=kenneth
+Expected response body:
+[
+    {
+        "transactionId": "6f8532bb-d8a9-4bb3-af61-85ecd8611cd3",
+        "userId": "kenneth",
+        "instrument": "APPL",
+        "orderType": "Buy",
+        "price": 100,
+        "quantity": 1
+    }
+]
+
+5. Obtain the orders filled for thomas
+Method Type: GET
+URL: http://localhost:8080/api/users?user=Thomas
+Expected response body:
+[
+    {
+        "transactionId": "5bcb7fc3-9da9-49de-a9a6-6ba54e167dde",
+        "userId": "Thomas",
+        "instrument": "APPL",
+        "orderType": "Sell",
+        "price": 100,
+        "quantity": 1
+    }
+]
